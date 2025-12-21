@@ -1,5 +1,5 @@
-----------------------//INVENTORY HANDLER//-----------------------
-
+----------------------------------------
+----------- INVENTORY HANDLER ----------
 --!nonstrict
 ------[[MODULE]]-----
 local InventoryHandler = {}
@@ -19,19 +19,16 @@ local Player = Players.LocalPlayer
 
 --// Ui
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local UiFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("Ui")
 
-local ToolButtonTemplate = UiFolder:WaitForChild("UiTemplates"):WaitForChild("InventoryTemplates"):WaitForChild("toolButtonTemplate")
+local ToolButtonTemplate = ReplicatedStorage.Assets.UiTemplates.toolButtonTemplate
 local CustomInventoryFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("CustomInventory")
 
 local hotBarFrame :Frame = CustomInventoryFolder:WaitForChild("hotBar")
---local openButton  :TextButton = CustomInventoryFolder:WaitForChild("openButton")
-
 local Inventory   :ImageLabel = CustomInventoryFolder:WaitForChild("Inventory")
 
 --// Modules
 --Helper
-local InventoryHelper = require(UiFolder:WaitForChild("UiModules"):WaitForChild("UiHelpers"):WaitForChild("InventoryHelper"))
+local InventoryHelper = require(ReplicatedStorage.Modules.ClientUiModules.UiHelpers.InventoryHelper)
 
 local BackPackConn = nil -- Connection for child added event
 local HasInitialized = false -- tracks whether the module alreday initialized 
@@ -42,7 +39,6 @@ local ToolConns = {}
 ------[[FUNCTIONS]]-----
 -- Initialization function that creates buttons for tools in the backpack
 -- and setups when new tools are added
--- also disables the default backpack gui
 
 local function initialize()
     local Character = Player.Character or Player.CharacterAdded:Wait()
@@ -94,7 +90,6 @@ local function initialize()
 end
 
 local function Reset()
-    EquippedTrack = nil
     
     for _,ToolConnection in pairs(ToolConns) do
         for _,Connection in ipairs(ToolConnection) do
@@ -144,9 +139,10 @@ end
 
 return InventoryHandler
 
-----------------------------------------------------------------------
----------------------- INVENTORY HELPER ------------------------------
-----------------------------------------------------------------------
+
+----------------------------------
+----------INENTORY HELPER---------
+
 ------[[MODULE]]-----
 local InventoryHelper = {
     SlotNumber = 9;
@@ -156,18 +152,16 @@ local InventoryHelper = {
     CurrentDragButton = nil
 }
 
+InventoryHelper.ButtonClass.__index = InventoryHelper.ButtonClass
 ------[[CONSTANTS/SETTINGS]]-------
 local TOUCH_INPUT_SENSITIVITY = 40 -- How far u can move the mouse so the tool registers as a drag instead
-
--- We index the button clas to it self
-
-InventoryHelper.ButtonClass.__index = InventoryHelper.ButtonClass
 
 -----[[SERVICES]]-----
 local PLayers = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 ------[[VARIABLES]]-----
 local Player = PLayers.LocalPlayer
@@ -175,18 +169,19 @@ local Mouse = Player:GetMouse()
 
 --// Ui
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local UiFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("Ui")
-
-local ToolButtonTemplate = UiFolder:WaitForChild("UiTemplates"):WaitForChild("InventoryTemplates"):WaitForChild("toolButtonTemplate")
 local CustomInventoryFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("CustomInventory")
 
 local hotBarFrame :Frame = CustomInventoryFolder:WaitForChild("hotBar")
---local openButton  :TextButton = CustomInventoryFolder:WaitForChild("openButton")
-
 local Inventory   :ImageLabel = CustomInventoryFolder:WaitForChild("Inventory")
-local EmptyButtonTemplate = UiFolder:WaitForChild("UiTemplates"):WaitForChild("InventoryTemplates"):WaitForChild("emptyButtonTemplate")
 
 local SearchBox :TextBox= Inventory:WaitForChild("SearchBox")
+
+--Templates
+local UiTemlates = ReplicatedStorage.Assets.UiTemplates
+
+local EmptyButtonTemplate = UiTemlates:WaitForChild("emptyButtonTemplate")
+local ToolButtonTemplate = UiTemlates:WaitForChild("toolButtonTemplate")
+
 -- KeyBoardEnums
 local KeyBoard_Inputs = {
     Enum.KeyCode.One;
@@ -761,4 +756,3 @@ end
 SetUpSearchBox()
 
 return InventoryHelper
-
