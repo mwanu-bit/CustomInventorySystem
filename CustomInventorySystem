@@ -1,9 +1,4 @@
-----------------------------------------
------------ INVENTORY HANDLER ----------
 --!nonstrict
-------[[MODULE]]-----
-local InventoryHandler = {}
-
 -----[[SERVICES]]-----
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -13,9 +8,11 @@ StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 ------[[VARIABLES]]-----
 local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
 
 --// Ui
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -25,164 +22,10 @@ local CustomInventoryFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("Cu
 
 local hotBarFrame :Frame = CustomInventoryFolder:WaitForChild("hotBar")
 local Inventory   :ImageLabel = CustomInventoryFolder:WaitForChild("Inventory")
-
---// Modules
---Helper
-local InventoryHelper = require(ReplicatedStorage.Modules.ClientUiModules.UiHelpers.InventoryHelper)
-
-local BackPackConn = nil -- Connection for child added event
-local HasInitialized = false -- tracks whether the module alreday initialized 
-
-local CharacterConn = nil
-local ToolConns = {}
-
-------[[FUNCTIONS]]-----
--- Initialization function that creates buttons for tools in the backpack
--- and setups when new tools are added
-
-local function initialize()
-    local Character = Player.Character or Player.CharacterAdded:Wait()
-    
-    local Backpack = Player:WaitForChild("Backpack")
-    local StarterGear = Player:WaitForChild("StarterGear")
-  
-    --Function to set up the tool
-    local function SetupTool(Tool:Tool)
-        if not Tool:IsA("Tool") then
-            return
-        end
-        
-        local already_processed = Tool:GetAttribute("Processed")
-        if already_processed then
-            return
-        end
-    
-        local ClonedButton = ToolButtonTemplate:Clone()
-        ClonedButton.Visible = true
-                 
-        local ButtonObj = InventoryHelper.ButtonClass.new(ClonedButton,Tool)
-        return ButtonObj
-    end
-    
-    for _,Tool in ipairs(Backpack:GetChildren()) do
-       SetupTool(Tool)
-    end
-    
-    BackPackConn = Backpack.ChildAdded:Connect(function(Child)
-       SetupTool(Child)
-    end)
-    
-    CharacterConn = Character.ChildAdded:Connect(function(Child)
-        if not Child:IsA("Tool") then
-            return
-        end
-     
-        local ButtonObj = SetupTool(Child)
-        if not ButtonObj then
-            return
-        end
-        
-        ButtonObj:On_ButtonClick(true)        
-    end)
-    
-    HasInitialized = true
-    
-end
-
-local function Reset()
-    
-    for _,ToolConnection in pairs(ToolConns) do
-        for _,Connection in ipairs(ToolConnection) do
-            Connection:Disconnect()            
-        end
-    end
-    
-    table.clear(ToolConns)
-    
-    table.clear(InventoryHelper.Buttons)
-    InventoryHelper.SlotNumber = 9
-
-    InventoryHelper.EquippedTool = nil
-    InventoryHelper.CurrentDragButton = nil
-    
-    if BackPackConn then
-        BackPackConn:Disconnect()
-        BackPackConn = nil
-    end
-    
-    if CharacterConn then
-        CharacterConn:Disconnect()
-        CharacterConn = nil
-    end
-
-end
-
---Inventoiry opening
-UserInputService.InputBegan:Connect(function(Input)
-    if Input.KeyCode == Enum.KeyCode.Backquote then
-        InventoryHelper:OpenInventory()
-    end
-end)
-
-function InventoryHandler:Init()
-    initialize()
-    
-    --Character added event
-    Player.CharacterAdded:Connect(function(Character)
-        if HasInitialized then
-            Reset()
-            initialize()
-        end
-        
-    end)
-end
-
-return InventoryHandler
-
-
-----------------------------------
-----------INENTORY HELPER---------
-
-------[[MODULE]]-----
-local InventoryHelper = {
-    SlotNumber = 9;
-    ButtonClass = {};
-    Buttons = {};
-    EquippedTool = nil;
-    CurrentDragButton = nil
-}
-
-InventoryHelper.ButtonClass.__index = InventoryHelper.ButtonClass
-------[[CONSTANTS/SETTINGS]]-------
-local TOUCH_INPUT_SENSITIVITY = 40 -- How far u can move the mouse so the tool registers as a drag instead
-
------[[SERVICES]]-----
-local PLayers = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-------[[VARIABLES]]-----
-local Player = PLayers.LocalPlayer
-local Mouse = Player:GetMouse()
-
---// Ui
-local PlayerGui = Player:WaitForChild("PlayerGui")
-local CustomInventoryFolder = PlayerGui:WaitForChild("MainGui"):WaitForChild("CustomInventory")
-
-local hotBarFrame :Frame = CustomInventoryFolder:WaitForChild("hotBar")
-local Inventory   :ImageLabel = CustomInventoryFolder:WaitForChild("Inventory")
-
 local SearchBox :TextBox= Inventory:WaitForChild("SearchBox")
 
---Templates
-local UiTemlates = ReplicatedStorage.Assets.UiTemplates
+local EmptyButtonTemplate = ReplicatedStorage.Assets.UiTemplates:WaitForChild("emptyButtonTemplate")
 
-local EmptyButtonTemplate = UiTemlates:WaitForChild("emptyButtonTemplate")
-local ToolButtonTemplate = UiTemlates:WaitForChild("toolButtonTemplate")
-
--- KeyBoardEnums
 local KeyBoard_Inputs = {
     Enum.KeyCode.One;
     Enum.KeyCode.Two;
@@ -194,516 +37,88 @@ local KeyBoard_Inputs = {
     Enum.KeyCode.Eight;
     Enum.KeyCode.Nine
 }
-    
-------[[FUNCTIONS]]-----
---Class Creation for buttons
-function InventoryHelper.ButtonClass.new(button :TextButton, tool :Tool)
-    local self = setmetatable({}, InventoryHelper.ButtonClass)
-    
+
+local TOUCH_INPUT_SENSITIVITY = 40
+
+------[[SYSTEM STATE]]-----
+local SlotNumber = 9
+local Buttons = {}
+local EquippedTool = nil
+local CurrentDragButton = nil
+local BackPackConn = nil
+local CharacterConn = nil
+local ToolConns = {}
+local HasInitialized = false
+
+------[[BUTTON CLASS]]-----
+local ButtonClass = {}
+ButtonClass.__index = ButtonClass
+
+function ButtonClass.new(button :TextButton, tool :Tool)
+    local self = setmetatable({}, ButtonClass)
+
     self.Button = button
     self.Tool = tool
-    
+
     self.Equipped = false
     self.is_Dragging = false
-    
+
     self.DragStartPosition = nil
-    self.GhostButton = nil -- Ghost button for dragging
-    
-    --set the tool info
+    self.DragFrame = nil  -- We store a temporary Drag Frame
+
     self.Button.toolName.Text = tool.Name
     self.Button.Name = tool.Name
-       
+
     if tool.TextureId then
         self.Button.toolIcon.Image = tool.TextureId
         self.Button.toolIcon.Visible = true
     end
     tool:SetAttribute("Processed",true)
-    
-    local RemainingSlots = InventoryHelper.SlotNumber -- e.g = 2
+
+    local RemainingSlots = SlotNumber
     if RemainingSlots > 0 then
-        
-        local UsedUpSlots = 9 - RemainingSlots -- e.g = 9 - 2 = 7
-        local LayoutOrder = math.clamp(UsedUpSlots + 1,1,9) -- == 8
-        
+
+        local UsedUpSlots = 9 - RemainingSlots
+        local LayoutOrder = math.clamp(UsedUpSlots + 1,1,9)
+
         self.Button.LayoutOrder = LayoutOrder
         self.Button.toolNumber.Text = LayoutOrder
-        
-        InventoryHelper.SlotNumber -= 1
+
+        SlotNumber -= 1
         self.Button.Parent = hotBarFrame
-        
+
     else
         self.Button.Parent = Inventory.Frame
-        
+
     end
-    
-    InventoryHelper.Buttons[self.Button] = self
+
+    Buttons[self.Button] = self
     self:On_Input()
-    
-    --Clean up the button when the tool is removed
+
     self.Tool.Destroying:Connect(function()
         self:CleanUp()
     end)
-    
+
     return self
 end
 
--- Processs the button clicks
-function InventoryHelper.ButtonClass:On_ButtonClick(Is_New:boolean)
-    --The is new bool is passed when the player picks up a tool and it is automatically parented to thier character
-    if self.is_Dragging then
-        return
-    end
+------[[FUNCTIONS]]-----
+--Function is called to reorganize ethe hotbar
+local function Organize_HotBar()
+    local HotBarButtons = {}
 
-    local Character = Player.Character or Player.CharacterAdded:Wait()
-    local Humanoid :Humanoid = Character and Character:WaitForChild("Humanoid")
-
-    if not Humanoid then 
-        return
-    end
-    
-    -- Checks is theres a currently equipped tool and if there is it unequips it --[[CLEAN UP LOGIC]]
-    if InventoryHelper.EquippedTool  then
-        --Basically if this is not a new tool  we unequip it
-        --If it is a new we do not unequip it since its already in the players character
-        if not Is_New then
-            Humanoid:UnequipTools()
-        end
-        
-        local ToolObj = InventoryHelper.EquippedTool
-
-        ToolObj.Button.BackgroundColor3 = Color3.new(0,0,0)
-        ToolObj.Equipped = false     
-
-        InventoryHelper.EquippedTool = nil
-
-        if ToolObj == self then
-            return -- If the equipped tool was the same one as the tool which activated the input we return since processing is already over
-        end
-
-    end
-    
-    
-    if Is_New then
-        if (self.Button.Parent == hotBarFrame) then
-            self.Equipped = true
-
-            self.Button.BackgroundColor3 = Color3.new(0.639216, 0.639216, 0.639216)
-            InventoryHelper.EquippedTool = self
-            return
-        end   
-    end
-    
-    Humanoid:UnequipTools()
-    
-    if not self.Eqipped then
-        Humanoid:EquipTool(self.Tool)
-        self.Equipped = true
-        self.Button.BackgroundColor3 = Color3.new(0.639216, 0.639216, 0.639216)
-        InventoryHelper.EquippedTool = self
-    end
-   
-end
-
---Function determines the parent of the button after dragging
-function InventoryHelper.ButtonClass:On_DragEnd()
-    local Button = self.Button
-    self.is_Dragging = false
-    
-    local GhostButtonParent = nil
-    local DragHandled = false
-
-    if self.GhostButton then
-        GhostButtonParent = self.GhostButton.Parent
-        
-        self.GhostButton:Destroy()
-        self.GhostButton = nil
-    end
-    
-    --Sets the buttons parent to wherever the player dragged the button to
-    local guisAtPos = PlayerGui:GetGuiObjectsAtPosition(Mouse.X,Mouse.Y)
-    if not guisAtPos then
-        --Sanity Check
-        Button.Parent = hotBarFrame
-
-        Button.SizeConstraint = Enum.SizeConstraint.RelativeYY
-        Button.Size = UDim2.fromScale(1,1)
-
-        return
-    end
-
-    
-    for _,gui in ipairs(guisAtPos) do
-
-        --//REMOVING
-        if gui.Name == "Inventory" then
-            
-            --Sanity check
-            if not Inventory.Visible or GhostButtonParent == Inventory.Frame then
-                break
-            end
-            
-            --If the player dragged the button from hotbar to inventory
-            Button.Parent = gui.Frame
-            Button.LayoutOrder = 0
-            
-            Button.toolNumber.Text = ""
-            InventoryHelper.SlotNumber += 1
-            
-            local Buttons = {}
-
-            --WE insert the total number of buttons in the hotbar
-            for i,v in ipairs(hotBarFrame:GetChildren()) do
-                if v:IsA("ImageButton") then
-                    table.insert(Buttons,v)
-                end
-            end
-
-            local LayoutOrder = #Buttons + 1
-
-            local EmptyButton = EmptyButtonTemplate:Clone()
-            EmptyButton.Visible = true
-            
-            EmptyButton.LayoutOrder = LayoutOrder
-
-            EmptyButton.toolNumber.Text = LayoutOrder
-            EmptyButton.Parent = hotBarFrame
-
-            table.insert(Buttons,EmptyButton)
-            
-            InventoryHelper:Organize_HotBar()
-            
-            DragHandled = true
-            break
-        
-        --//SWITCHING
-        elseif gui:IsA("ImageButton") and gui.Parent == hotBarFrame then
-            --the player wants to replace an item in the hotbar
-            local guiLayoutOrder = gui.LayoutOrder
-            
-            -- If it is a replacement of items within the hotbar we simply switch thier layout orders
-            if GhostButtonParent == hotBarFrame then
-                if gui == Button then
-                    break -- If the player drags a button to the same spot
-                end
-                
-                local buttonLayoutOrder = Button.LayoutOrder
-                
-                gui.LayoutOrder = buttonLayoutOrder
-                gui.toolNumber.Text = gui.LayoutOrder
-                
-                Button.LayoutOrder = guiLayoutOrder
-                Button.toolNumber.Text = guiLayoutOrder
-                
-            --If its a replacement of an item in the inventory to the hotbar    
-            elseif GhostButtonParent == Inventory.Frame then
-                --Sanity check
-                if not Inventory.Visible then
-                    break
-                end
-                
-                Button.LayoutOrder = guiLayoutOrder
-
-                Button.Parent = hotBarFrame
-
-                Button.SizeConstraint = Enum.SizeConstraint.RelativeYY
-                Button.Size = UDim2.fromScale(1,1)
-                
-                -- This for the empty buttons
-                if gui.Name == "emptyButtonTemplate" then
-                    gui:Destroy()
-                else
-                    gui.toolNumber.Text = ""
-                    gui.LayoutOrder = 0
-
-                    gui.Parent = Inventory.Frame    
-                end
-               
-            end
-            
-            DragHandled = true
-            break
-           
-        --//ADDING  
-        elseif gui == hotBarFrame then
-            --SanityCheck
-            if GhostButtonParent == hotBarFrame then
-                break
-            end
-            
-            --SanityCheck
-            local TotalItemsInHotbar = 0
-            for _,Item in ipairs(hotBarFrame:GetChildren()) do
-                if Item:IsA("ImageButton") then
-                    TotalItemsInHotbar += 1
-                end
-            end
-            
-            if TotalItemsInHotbar > 9 then
-                break
-            end
-
-            local LayoutOrder = TotalItemsInHotbar + 1
-            Button.LayoutOrder = LayoutOrder
-
-            Button.toolNumber.Text = LayoutOrder               
-            Button.Parent = hotBarFrame
-
-            Button.SizeConstraint = Enum.SizeConstraint.RelativeYY
-            Button.Size = UDim2.fromScale(1,1)
-
-            InventoryHelper.SlotNumber -= 1
-            DragHandled = true
-            break
-        end
-    end
-    
-    --//Fall back 
-    if not DragHandled then
-        if GhostButtonParent == hotBarFrame then
-            Button.Parent = hotBarFrame
-
-            Button.SizeConstraint = Enum.SizeConstraint.RelativeYY
-            Button.Size = UDim2.fromScale(1,1)
-        else
-            Button.Parent = Inventory.Frame
-        end
-    end
-  
-end
-
---Function drags the button
-function InventoryHelper.ButtonClass:On_Drag()
-    local Button = self.Button
-  
-    --Unequip the tool is its the one being dragged
-    if InventoryHelper.EquippedTool then
-        local ToolObj = InventoryHelper.EquippedTool
-        if ToolObj == self then
-            local Character = Player.Character or Player.CharacterAdded:Wait()
-            local Humanoid :Humanoid = Character and Character:WaitForChild("Humanoid")
-            
-            Humanoid:UnequipTools()
-            
-            ToolObj.Button.BackgroundColor3 = Color3.new(0,0,0)
-            InventoryHelper.EquippedTool = nil
-        end
-    end
-
-    self.is_Dragging = true
-    
-    self.GhostButton = self.Button:Clone()
-    self.GhostButton.Parent = self.Button.Parent
-
-    Button.SizeConstraint = Enum.SizeConstraint.RelativeXY
-    Button.Size = UDim2.fromScale(0.063,0.1)
-    
-    Button.Position = UDim2.fromOffset(Mouse.X,Mouse.Y)
-    Button.Parent = self.Button.Parent.Parent.Parent
-    
-    --Start dragging
-    self.dragConn = nil
-    self.dragConn = Mouse.Move:Connect(function()
-        if not self.is_Dragging or not self.Button then 
-            self.dragConn:Disconnect()
-            self.dragConn = nil
-            return
-        end
-        
-        Button.Position = UDim2.fromOffset(Mouse.X,Mouse.Y)
-    end)
-end
-
---Function runs when a player wants to drag the tool to the inventory
-function InventoryHelper.ButtonClass:On_Input()
-    
-    self.MouseMoveConnection = nil
-    self.MouseButton1Connection = nil
-  
-    local Button :ImageButton = self.Button
-    if not Button then
-        return
-    end
-    
-    self.MouseButton1Connection = Button.MouseButton1Down:Connect(function()
-        self.is_Dragging = false
-        self.DragStartPosition = nil
-        
-        InventoryHelper.CurrentDragButton = self
-        self.DragStartPosition = Vector2.new(Mouse.X,Mouse.Y) 
-        
-        self.MouseMoveConnection = RunService.Heartbeat:Connect(function()
-            if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                self.MouseMoveConnection:Disconnect()
-                return
-            end
-            
-            local CurrentMousePos = Vector2.new(Mouse.X,Mouse.Y)
-            local distance = (CurrentMousePos - self.DragStartPosition).Magnitude
-            
-            if distance > TOUCH_INPUT_SENSITIVITY or not self.Button then 
-                self.MouseMoveConnection:Disconnect()
-                self:On_Drag()
-            end
-        end)
-        
-    end)
-  
-end
-
---Cleans up the button in case the tool gets destroyed
-function InventoryHelper.ButtonClass:CleanUp()
-    if InventoryHelper.EquippedTool == self then
-        InventoryHelper.EquippedTool = nil
-    end
-    
-    if InventoryHelper.CurrentDragButton == self then
-        InventoryHelper.CurrentDragButton = nil
-    end
-    
-    if self.MouseButton1Connection then
-        self.MouseButton1Connection:Disconnect()
-        self.MouseButton1Connection = nil
-    end
-    
-    if self.MouseMoveConnection then
-        self.MouseMoveConnection:Disconnect()
-        self.MouseMoveConnection = nil
-    end
-    
-    if self.dragConn then
-        self.dragConn:Disconnect()
-        self.dragConn = nil
-    end
-    
-    if self.Button then
-        self.Button:Destroy()
-        self.Button = nil               
-    end
-    
-    if self.GhostButton then
-        self.GhostButton:Destroy()
-        self.GhostButton = nil
-    end
-    
-    self.Tool = nil
-end
-
---Drag tracker
---Detects if the input was a click not a drag and calls the onclick function
-UserInputService.InputEnded:Connect(function(Input,Processed)
-    local ButtonObj = InventoryHelper.CurrentDragButton
-    if not ButtonObj then 
-        return
-    end
-    
-    local Button = ButtonObj.Button
-    
-    if not Input or Input.UserInputType ~= Enum.UserInputType.MouseButton1 or not ButtonObj.DragStartPosition then
-        return
-    end
-    
-    local DragEndPosition = Vector2.new(Mouse.X,Mouse.Y)
-    local distance = (DragEndPosition - ButtonObj.DragStartPosition).Magnitude
-
-    if ButtonObj.is_Dragging then
-        ButtonObj:On_DragEnd()
-
-    elseif distance <= TOUCH_INPUT_SENSITIVITY then
-        --Click
-        ButtonObj:On_ButtonClick()
-
-    end
-end)
-
--- Detects keyboard input for the inventory
-UserInputService.InputBegan:Connect(function(Input,Processed)
-    if not Input then 
-        return
-    end
-    
-    local numberInput = table.find(KeyBoard_Inputs,Input.KeyCode)
-    if not numberInput then
-        return
-    end
-    
-    local ButtonObj = nil
-    for _,Button in ipairs(hotBarFrame:GetChildren()) do
-        if Button:IsA("ImageButton")  and Button.LayoutOrder == numberInput then
-            ButtonObj = InventoryHelper.Buttons[Button]
-            break
-        end
-    end
-    
-    --SanityCheck
-    if not ButtonObj then
-        return
-    end
-    
-    ButtonObj:On_ButtonClick()
-end)
-
---Opens the Inventory
-function InventoryHelper:OpenInventory()
-    if not Inventory then
-        return
-    end
-    
-    Inventory.Visible = not Inventory.Visible
-    if Inventory.Visible then
-        local Buttons = {}
-
-        --WE insert the total number of buttons in the hotbar
-        for i,v in ipairs(hotBarFrame:GetChildren()) do
-            if v:IsA("ImageButton") then
-                table.insert(Buttons,v)
-            end
-        end
-             
-        local Remaining_to_fill = 9 - #Buttons
-        if Remaining_to_fill > 0 then
-            for i = 1,Remaining_to_fill do
-                local LayoutOrder = #Buttons + 1
-                
-                local EmptyButton = EmptyButtonTemplate:Clone()
-                EmptyButton.Visible = true
-                
-                EmptyButton.LayoutOrder = LayoutOrder
-                
-                EmptyButton.toolNumber.Text = LayoutOrder
-                EmptyButton.Parent = hotBarFrame
-                
-                table.insert(Buttons,EmptyButton)
-            end
-        end
-        
-    else
-        for _,Button in ipairs(hotBarFrame:GetChildren()) do
-            if Button.Name == "emptyButtonTemplate" then
-                Button:Destroy()
-            end
-        end
-        
-        InventoryHelper:Organize_HotBar()
-    end
-end
-
---Function reorganizes the inventory buttons in the hotbar
-function InventoryHelper:Organize_HotBar()
-    local Buttons = {}
-    
-    --WE insert the total number of buttons in the hotbar
     for i,v in ipairs(hotBarFrame:GetChildren()) do
         if v:IsA("ImageButton") then
-            table.insert(Buttons,v)
+            table.insert(HotBarButtons,v)
         end
     end
-    
-    table.sort(Buttons,function(a,b)
+
+    table.sort(HotBarButtons,function(a,b)
         return a.LayoutOrder < b.LayoutOrder
     end)
-    
-  
-    for i,Button in ipairs(Buttons) do
+
+
+    for i,Button in ipairs(HotBarButtons) do
         if Button:IsA("ImageButton") then
             Button.LayoutOrder = i
             Button.toolNumber.Text = Button.LayoutOrder
@@ -711,11 +126,55 @@ function InventoryHelper:Organize_HotBar()
     end
 end
 
---// Search box logic
+--Function is called when the player inputs  [``] to open the inventory
+local function OpenInventory()
+    if not Inventory then
+        return
+    end
+
+    Inventory.Visible = not Inventory.Visible
+    if Inventory.Visible then
+        local HotBarButtons = {}
+
+        for i,v in ipairs(hotBarFrame:GetChildren()) do
+            if v:IsA("ImageButton") then
+                table.insert(HotBarButtons,v)
+            end
+        end
+
+        local Remaining_to_fill = 9 - #HotBarButtons
+        if Remaining_to_fill > 0 then
+            for i = 1,Remaining_to_fill do
+                local LayoutOrder = #HotBarButtons + 1
+
+                local EmptyButton = EmptyButtonTemplate:Clone()
+                EmptyButton.Visible = true
+
+                EmptyButton.LayoutOrder = LayoutOrder
+
+                EmptyButton.toolNumber.Text = LayoutOrder
+                EmptyButton.Parent = hotBarFrame
+
+                table.insert(HotBarButtons,EmptyButton)
+            end
+        end
+
+    else
+        for _,Button in ipairs(hotBarFrame:GetChildren()) do
+            if Button.Name == "emptyButtonTemplate" then
+                Button:Destroy()
+            end
+        end
+
+        Organize_HotBar()
+    end
+end
+
+--Function sets up tehs earch box
 local function SetUpSearchBox()
     local InventoryButtons = {}
     local IsFocused = false
-    
+
     SearchBox.Focused:Connect(function()
         IsFocused = true
         for _,Button in ipairs(Inventory.Frame:GetChildren()) do
@@ -724,15 +183,15 @@ local function SetUpSearchBox()
             end
         end
     end)
-    
+
     SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
         if not IsFocused then
             return
         end
-        
+
         local SearchBoxText = SearchBox.Text
         local TextAmount = #SearchBoxText
-        
+
         for ButtonName,Button in pairs(InventoryButtons) do
             local ButtonNameText = string.sub(ButtonName,1,TextAmount)
             if ButtonNameText ~= SearchBoxText then
@@ -742,7 +201,7 @@ local function SetUpSearchBox()
             end
         end
     end)
-    
+
     SearchBox.FocusLost:Connect(function(enterPressed)
         for _,Button in ipairs(Inventory.Frame:GetChildren()) do
             if Button:IsA("ImageButton") then
@@ -753,6 +212,490 @@ local function SetUpSearchBox()
     end)
 end
 
+--Function sets up a toool added to the players back pack
+local function SetupTool(Tool:Tool)
+    if not Tool:IsA("Tool") then
+        return
+    end
+
+    local already_processed = Tool:GetAttribute("Processed")
+    if already_processed then
+        return
+    end
+
+    local ClonedButton = ToolButtonTemplate:Clone()
+    ClonedButton.Visible = true
+
+    local ButtonObj = ButtonClass.new(ClonedButton,Tool)
+    return ButtonObj
+end
+
+--INIT()
+local function initialize()
+    local Character = Player.Character or Player.CharacterAdded:Wait()
+
+    local Backpack = Player:WaitForChild("Backpack")
+    local StarterGear = Player:WaitForChild("StarterGear")
+
+    for _,Tool in ipairs(Backpack:GetChildren()) do
+        SetupTool(Tool)
+    end
+
+    BackPackConn = Backpack.ChildAdded:Connect(function(Child)
+        SetupTool(Child)
+    end)
+
+    CharacterConn = Character.ChildAdded:Connect(function(Child)
+        if not Child:IsA("Tool") then
+            return
+        end
+
+        local ButtonObj = SetupTool(Child)
+        if not ButtonObj then
+            return
+        end
+
+        ButtonObj:On_ButtonClick(true)        
+    end)
+
+    HasInitialized = true
+
+end
+
+-- A reset function to hanle player death
+local function Reset()
+
+    for _,ToolConnection in pairs(ToolConns) do
+        for _,Connection in ipairs(ToolConnection) do
+            Connection:Disconnect()            
+        end
+    end
+
+    table.clear(ToolConns)
+
+    table.clear(Buttons)
+    SlotNumber = 9
+
+    EquippedTool = nil
+    CurrentDragButton = nil
+
+    if BackPackConn then
+        BackPackConn:Disconnect()
+        BackPackConn = nil
+    end
+
+    if CharacterConn then
+        CharacterConn:Disconnect()
+        CharacterConn = nil
+    end
+
+end
+
+------[[CLASS METHODS]]-----
+--Function equip or unequips the tool when its corresponding button is clicked
+function ButtonClass:On_ButtonClick(Is_New:boolean)
+    if self.is_Dragging then
+        return
+    end
+
+    local Character = Player.Character or Player.CharacterAdded:Wait()
+    local Humanoid :Humanoid = Character and Character:WaitForChild("Humanoid")
+
+    if not Humanoid then 
+        return
+    end
+
+    if EquippedTool  then
+        if not Is_New then
+            Humanoid:UnequipTools()
+        end
+
+        local ToolObj = EquippedTool
+
+        ToolObj.Button.BackgroundColor3 = Color3.new(0,0,0)
+        ToolObj.Equipped = false     
+
+        EquippedTool = nil
+
+        if ToolObj == self then
+            return
+        end
+
+    end
+
+
+    if Is_New then
+        if (self.Button.Parent == hotBarFrame) then
+            self.Equipped = true
+
+            self.Button.BackgroundColor3 = Color3.new(0.639216, 0.639216, 0.639216)
+            EquippedTool = self
+            return
+        end   
+    end
+
+    Humanoid:UnequipTools()
+
+    if not self.Eqipped then
+        Humanoid:EquipTool(self.Tool)
+        self.Equipped = true
+        self.Button.BackgroundColor3 = Color3.new(0.639216, 0.639216, 0.639216)
+        EquippedTool = self
+    end
+
+end
+
+function ButtonClass:On_DragEnd()
+    local Button = self.Button
+    self.is_Dragging = false
+
+    -- Destroy the drag frame
+    if self.DragFrame then
+        self.DragFrame:Destroy()
+        self.DragFrame = nil
+    end
+
+    -- Get UI objects at mouse position
+    local guisAtPos = PlayerGui:GetGuiObjectsAtPosition(Mouse.X, Mouse.Y)
+
+    -- Track where to put the button
+    local NewParent = nil
+    local NewLayoutOrder = nil
+    local Handled = false
+
+    if guisAtPos then
+        for _,gui in ipairs(guisAtPos) do
+            -- Skip the drag frame and button itself
+            if gui == self.DragFrame or gui == Button then
+                continue
+            end
+
+            -- Check for Inventory drop
+            if gui.Name == "Inventory" then
+                if not Inventory.Visible then
+                    continue
+                end
+
+                NewParent = Inventory.Frame
+                NewLayoutOrder = 0
+                Button.toolNumber.Text = ""
+                SlotNumber += 1
+
+                -- Add empty button to hotbar
+                local TotalItemsInHotbar = 0
+                for _,Item in ipairs(hotBarFrame:GetChildren()) do
+                    if Item:IsA("ImageButton") then
+                        TotalItemsInHotbar += 1
+                    end
+                end
+
+                if TotalItemsInHotbar < 9 then
+                    local EmptyButton = EmptyButtonTemplate:Clone()
+                    EmptyButton.Visible = true
+                    EmptyButton.LayoutOrder = TotalItemsInHotbar + 1
+                    EmptyButton.toolNumber.Text = EmptyButton.LayoutOrder
+                    EmptyButton.Parent = hotBarFrame
+                end
+
+                Handled = true
+                break
+
+                -- Check for hotbar button swap
+            elseif gui:IsA("ImageButton") and gui.Parent == hotBarFrame then
+                local targetLayoutOrder = gui.LayoutOrder
+
+                -- If coming from hotbar, swap positions
+                if Button.Parent == hotBarFrame then
+                    if gui == Button then
+                        continue
+                    end
+
+                    -- Swap layout orders
+                    local currentLayoutOrder = Button.LayoutOrder
+                    gui.LayoutOrder = currentLayoutOrder
+                    gui.toolNumber.Text = tostring(currentLayoutOrder)
+
+                    Button.LayoutOrder = targetLayoutOrder
+                    Button.toolNumber.Text = tostring(targetLayoutOrder)
+
+                    Organize_HotBar()
+
+                    -- If coming from inventory, replace
+                elseif Button.Parent == Inventory.Frame then
+                    if not Inventory.Visible then
+                        continue
+                    end
+
+                    NewParent = hotBarFrame
+                    NewLayoutOrder = targetLayoutOrder
+                    Button.toolNumber.Text = tostring(targetLayoutOrder)
+
+                    -- Move displaced button to inventory
+                    if gui.Name == "emptyButtonTemplate" then
+                        gui:Destroy()
+                    else
+                        gui.toolNumber.Text = ""
+                        gui.LayoutOrder = 0
+                        gui.Parent = Inventory.Frame
+                    end
+
+                    SlotNumber -= 1
+                end
+
+                Handled = true
+                break
+
+                -- Check for hotbar frame drop (empty spot)
+            elseif gui == hotBarFrame then
+                -- Check if already in hotbar
+                if Button.Parent == hotBarFrame then
+                    continue
+                end
+
+                -- Find empty spot
+                local TotalItemsInHotbar = 0
+                local occupiedSlots = {}
+
+                for _,Item in ipairs(hotBarFrame:GetChildren()) do
+                    if Item:IsA("ImageButton") then
+                        TotalItemsInHotbar += 1
+                        occupiedSlots[Item.LayoutOrder] = true
+                    end
+                end
+
+                if TotalItemsInHotbar >= 9 then
+                    continue
+                end
+
+                -- Find first empty layout order
+                for i = 1, 9 do
+                    if not occupiedSlots[i] then
+                        NewParent = hotBarFrame
+                        NewLayoutOrder = i
+                        Button.toolNumber.Text = tostring(i)
+                        SlotNumber -= 1
+                        Handled = true
+                        break
+                    end
+                end
+
+                if Handled then break end
+            end
+        end
+    end
+
+    -- Reset button properties
+    Button.SizeConstraint = Enum.SizeConstraint.RelativeYY
+    Button.Size = UDim2.fromScale(1,1)
+
+    -- Move button to new parent if handled
+    if Handled and NewParent then
+        Button.Parent = NewParent
+        if NewLayoutOrder then
+            Button.LayoutOrder = NewLayoutOrder
+        end
+    else
+        -- Return to original parent
+        if Button.Parent ~= hotBarFrame and Button.Parent ~= Inventory.Frame then
+            Button.Parent = (Button.toolNumber.Text == "" and Inventory.Frame) or hotBarFrame
+        end
+    end
+
+    Organize_HotBar()
+end
+
+function ButtonClass:On_Drag()
+    local Button = self.Button
+
+    if EquippedTool then
+        local ToolObj = EquippedTool
+        if ToolObj == self then
+            local Character = Player.Character or Player.CharacterAdded:Wait()
+            local Humanoid :Humanoid = Character and Character:WaitForChild("Humanoid")
+
+            Humanoid:UnequipTools()
+
+            ToolObj.Button.BackgroundColor3 = Color3.new(0,0,0)
+            EquippedTool = nil
+        end
+    end
+
+    self.is_Dragging = true
+
+    -- Create drag frame 
+    self.DragFrame = Button:Clone()
+    self.DragFrame.Size = UDim2.fromScale(0.063,0.1)
+    self.DragFrame.Parent = PlayerGui
+    self.DragFrame.ZIndex = 100  -- Ensure it's on top
+
+    -- Make original button semi-transparent
+    Button.ImageTransparency = 0.5
+    Button.toolIcon.ImageTransparency = 0.5
+    Button.toolName.TextTransparency = 0.5
+    Button.toolNumber.TextTransparency = 0.5
+
+    self.dragConn = nil
+    self.dragConn = RunService.Heartbeat:Connect(function()
+        if not self.is_Dragging or not self.DragFrame then 
+            self.dragConn:Disconnect()
+            self.dragConn = nil
+            return
+        end
+
+        self.DragFrame.Position = UDim2.fromOffset(Mouse.X - 25, Mouse.Y - 25)
+    end)
+end
+
+-- Function to handle button input
+function ButtonClass:On_Input()
+
+    self.MouseMoveConnection = nil
+    self.MouseButton1Connection = nil
+
+    local Button :ImageButton = self.Button
+    if not Button then
+        return
+    end
+
+    self.MouseButton1Connection = Button.MouseButton1Down:Connect(function()
+        self.is_Dragging = false
+        self.DragStartPosition = nil
+
+        CurrentDragButton = self
+        self.DragStartPosition = Vector2.new(Mouse.X,Mouse.Y) 
+
+        self.MouseMoveConnection = RunService.Heartbeat:Connect(function()
+            if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                self.MouseMoveConnection:Disconnect()
+                return
+            end
+
+            local CurrentMousePos = Vector2.new(Mouse.X,Mouse.Y)
+            local distance = (CurrentMousePos - self.DragStartPosition).Magnitude
+
+            if distance > TOUCH_INPUT_SENSITIVITY or not self.Button then 
+                self.MouseMoveConnection:Disconnect()
+                self:On_Drag()
+            end
+        end)
+
+    end)
+
+end
+
+--Method cleans up teh whole class
+function ButtonClass:CleanUp()
+    if EquippedTool == self then
+        EquippedTool = nil
+    end
+
+    if CurrentDragButton == self then
+        CurrentDragButton = nil
+    end
+
+    if self.MouseButton1Connection then
+        self.MouseButton1Connection:Disconnect()
+        self.MouseButton1Connection = nil
+    end
+
+    if self.MouseMoveConnection then
+        self.MouseMoveConnection:Disconnect()
+        self.MouseMoveConnection = nil
+    end
+
+    if self.dragConn then
+        self.dragConn:Disconnect()
+        self.dragConn = nil
+    end
+
+    if self.DragFrame then
+        self.DragFrame:Destroy()
+        self.DragFrame = nil
+    end
+
+    if self.Button then
+        self.Button:Destroy()
+        self.Button = nil               
+    end
+
+    self.Tool = nil
+end
+
+
+
+------[[INPUT HANDLERS]]-----
+UserInputService.InputBegan:Connect(function(Input,Processed)
+    if not Input then 
+        return
+    end
+
+    if Input.KeyCode == Enum.KeyCode.Backquote then
+        --Opens our inventory
+        OpenInventory()
+        return
+    end
+
+    local numberInput = table.find(KeyBoard_Inputs,Input.KeyCode)
+    if not numberInput then
+        return
+    end
+
+    local ButtonObj = nil
+    for _,Button in ipairs(hotBarFrame:GetChildren()) do
+        if Button:IsA("ImageButton")  and Button.LayoutOrder == numberInput then
+            ButtonObj = Buttons[Button]
+            break
+        end
+    end
+
+    if not ButtonObj then
+        return
+    end
+
+    ButtonObj:On_ButtonClick()
+end)
+
+UserInputService.InputEnded:Connect(function(Input,Processed)
+    local ButtonObj = CurrentDragButton
+    if not ButtonObj then 
+        return
+    end
+
+    local Button = ButtonObj.Button
+
+    if not Input or Input.UserInputType ~= Enum.UserInputType.MouseButton1 or not ButtonObj.DragStartPosition then
+        return
+    end
+
+    local DragEndPosition = Vector2.new(Mouse.X,Mouse.Y)
+    local distance = (DragEndPosition - ButtonObj.DragStartPosition).Magnitude
+
+    -- If the input ends and the player was dragging we call on drag end
+    if ButtonObj.is_Dragging then
+        ButtonObj:On_DragEnd()
+
+        -- Reset transparency
+        Button.ImageTransparency = 0
+        Button.toolIcon.ImageTransparency = 0
+        Button.toolName.TextTransparency = 0
+        Button.toolNumber.TextTransparency = 0
+
+    elseif distance <= TOUCH_INPUT_SENSITIVITY then 
+        -- Clicked, not dragged
+        ButtonObj:On_ButtonClick()
+
+    end
+end)
+
+------[[INITIALIZATION]]-----
+initialize()
 SetUpSearchBox()
 
-return InventoryHelper
+--Reintializes the whole system if the player respawns
+Player.CharacterAdded:Connect(function(Character)
+    if HasInitialized then
+        Reset()
+        initialize()
+    end
+
+end)
