@@ -1,4 +1,4 @@
---!nonstrict
+
 -----[[SERVICES]]-----
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -336,7 +336,7 @@ function ButtonClass:On_ButtonClick(Is_New:boolean)
 
     Humanoid:UnequipTools()
 
-    if not self.Eqipped then
+    if not self.Equipped then
         Humanoid:EquipTool(self.Tool)
         self.Equipped = true
         self.Button.BackgroundColor3 = Color3.new(0.639216, 0.639216, 0.639216)
